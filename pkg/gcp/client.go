@@ -63,6 +63,7 @@ type Client interface {
 
 	//CloudResourceManager
 	GetProjectName() string
+	GetUniverseDomain() string
 	GetProject(ctx context.Context, projectName string) (*cloudresourcemanager.Project, error)
 	GetProjectIamPolicy(string, *cloudresourcemanager.GetIamPolicyRequest) (*cloudresourcemanager.Policy, error)
 	SetProjectIamPolicy(string, *cloudresourcemanager.SetIamPolicyRequest) (*cloudresourcemanager.Policy, error)
@@ -86,6 +87,7 @@ type Client interface {
 
 type gcpClient struct {
 	projectName                string
+	universeDomain             string
 	creds                      *google.Credentials
 	cloudResourceManagerClient *cloudresourcemanager.Service
 	iamClient                  *iamadmin.IamClient
@@ -207,6 +209,10 @@ func (c *gcpClient) GetServiceAccountIamPolicy(svcAcctResource string) (*iam.Pol
 
 func (c *gcpClient) GetProjectName() string {
 	return c.projectName
+}
+
+func (c *gcpClient) GetUniverseDomain() string {
+	return c.universeDomain
 }
 
 func (c *gcpClient) GetProject(ctx context.Context, projectName string) (*cloudresourcemanager.Project, error) {
@@ -397,33 +403,46 @@ func (c *gcpClient) DeleteObject(ctx context.Context, bucketName, objectName str
 func NewClient(projectName string, creds *google.Credentials) (Client, error) {
 	ctx := context.TODO()
 
-	cloudResourceManagerClient, err := cloudresourcemanager.NewService(ctx, option.WithCredentials(creds))
+	ud, err := creds.GetUniverseDomain()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get universe domain: %w", err)
+	}
+	var authOpts []option.ClientOption
+	if len(creds.JSON) > 0 {
+		authOpts = append(authOpts, option.WithCredentialsJSON(creds.JSON))
+	} else {
+		authOpts = append(authOpts, option.WithCredentials(creds))
+	}
+	authOpts = append(authOpts, option.WithUniverseDomain(ud))
+
+	cloudResourceManagerClient, err := cloudresourcemanager.NewService(ctx, authOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	iamClient, err := iamadmin.NewIamClient(ctx, option.WithCredentials(creds))
+	iamClient, err := iamadmin.NewIamClient(ctx, authOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	iamService, err := iam.NewService(ctx, option.WithCredentials(creds))
+	iamService, err := iam.NewService(ctx, authOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	serviceUsageClient, err := serviceusage.NewService(ctx, option.WithCredentials(creds))
+	serviceUsageClient, err := serviceusage.NewService(ctx, authOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	storageClient, err := storage.NewClient(ctx, option.WithCredentials(creds))
+	storageClient, err := storage.NewClient(ctx, authOpts...)
 	if err != nil {
 		return nil, err
 	}
 
 	return &gcpClient{
 		projectName:                projectName,
+		universeDomain:             ud,
 		creds:                      creds,
 		cloudResourceManagerClient: cloudResourceManagerClient,
 		iamClient:                  iamClient,
